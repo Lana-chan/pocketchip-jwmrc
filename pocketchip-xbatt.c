@@ -12,9 +12,7 @@
 #include <string.h>
 #include <getopt.h>
 
-#define PATH_BATT_CHARGE_NOW "/sys/class/power_supply/axp20x-battery/voltage_now"
-#define PATH_BATT_CHARGE_MAX "/sys/class/power_supply/axp20x-battery/voltage_max_design"
-#define PATH_BATT_CHARGE_MIN "/sys/class/power_supply/axp20x-battery/voltage_min_design"
+#define PATH_BATT_CHARGE_NOW "/sys/class/power_supply/axp20x-battery/capacity"
 #define PATH_BATT_STATUS     "/sys/class/power_supply/axp20x-battery/status"
 
 #define STATUS_CHARGING    "Charging"
@@ -56,9 +54,6 @@ static Colormap colormap;
 static Window window;
 static XftColor font_color;
 static XftColor background_color;
-
-static int max_voltage = 0;
-static int min_voltage = 0;
 
 static char *font_name = "Sans-8:bold";
 static char *foreground_color_name = "#ffffff";
@@ -111,19 +106,11 @@ static int draw() {
 			break;
 		}
 
-		char buf[256];	
+		char buf[32];	
 
 		int gauge = 0;
-		int voltage = 0;
 		int charging = 0;
-		if (read_int_file(PATH_BATT_CHARGE_NOW, &voltage) == 0) {
-			gauge = 100 * (voltage - min_voltage) / (max_voltage - min_voltage);
-			if (gauge < 0) {
-				gauge = 0;
-			} else if (gauge > 100) {
-				gauge = 100;
-			}
-
+		if (read_int_file(PATH_BATT_CHARGE_NOW, &gauge) == 0) {
 			sprintf(buf, "%d%%", gauge);
 		} else {
 			sprintf(buf, "?");
@@ -205,16 +192,6 @@ int main(int argc, char **argv) {
 		}
 	}
 	
-	if (read_int_file(PATH_BATT_CHARGE_MIN, &min_voltage) != 0) {
-		fprintf(stderr, "Could not get min voltage\n");
-		return 1;
-	}
-
-	if (read_int_file(PATH_BATT_CHARGE_MAX, &max_voltage) != 0) {
-		fprintf(stderr, "Could not get max voltage\n");
-		return 1;
-	}
-
 	display = XOpenDisplay(NULL);
 	if (!display) {
 		fprintf(stderr, "Could not open the display\n");
