@@ -12,14 +12,39 @@
 #include <string.h>
 #include <getopt.h>
 
-static int read_battery_file(const char *name, int *value) {
+#define PATH_BATT_CHARGE_NOW "/sys/class/power_supply/axp20x-battery/voltage_now"
+#define PATH_BATT_CHARGE_MAX "/sys/class/power_supply/axp20x-battery/voltage_max_design"
+#define PATH_BATT_CHARGE_MIN "/sys/class/power_supply/axp20x-battery/voltage_min_design"
+#define PATH_BATT_STATUS     "/sys/class/power_supply/axp20x-battery/status"
 
+#define STATUS_CHARGING    "Charging"
+#define STATUS_DISCHARGING "Discharging"
+
+static int read_int_file(const char *name, int *value) {
 	FILE *f = fopen(name, "r");
 	if (!f)
 		return -1;
 
 	int result = fscanf(f, "%d", value) >= 1 ? 0 : -1;
 	fclose(f);
+	return result;
+}
+
+static int read_status_file(const char *name, int *value) {
+	FILE *f = fopen(name, "r");
+	if (!f)
+		return -1;
+
+	char string[12];
+	int result = fscanf(f, "%s", string) >= 1 ? 0 : -1;
+	fclose(f);
+
+	if (!strcmp(string, STATUS_CHARGING)) {
+		*value = 1;
+	} else {
+		*value = 0;
+	}
+
 	return result;
 }
 
@@ -32,15 +57,18 @@ static Window window;
 static XftColor font_color;
 static XftColor background_color;
 
+static int max_voltage = 0;
+static int min_voltage = 0;
+
 static char *font_name = "Sans-8:bold";
 static char *foreground_color_name = "#ffffff";
 static char *background_color_name = "#ff007f";
 
-static int draw_gauge(int x, int y, int width, int height, int percentage, int charging) {
-
+static void draw_gauge(int x, int y, int width, int height, int percentage, int charging) {
 	GC gc = XCreateGC(display, window, 0, NULL);
-	if (!gc)
+	if (!gc) {
 		return;
+	}
 
 	XSetForeground(display, gc, font_color.pixel); 
 	
@@ -64,7 +92,6 @@ static int draw_gauge(int x, int y, int width, int height, int percentage, int c
 }
 
 static int draw() {
-
 	int result = 1;
 
 	XWindowAttributes attrs = {};
@@ -74,40 +101,35 @@ static int draw() {
 	XftDraw *font_draw = NULL;
 
 	do {
-
 		font = XftFontOpenName(display, screen, font_name); 
-		if (!font)
+		if (!font) {
 			break;
+		}
 
 		font_draw = XftDrawCreate(display, window, visual, colormap);
-		if (!font_draw) 
+		if (!font_draw) {
 			break;
-		
+		}
+
 		char buf[256];	
 
 		int gauge = 0;
 		int voltage = 0;
 		int charging = 0;
-		if (read_battery_file("/usr/lib/pocketchip-batt/voltage", &voltage) == 0) {
-
-			// I was using /usr/lib/pocketchip-batt/gauge previously which was set by pocketchip-one service, 
-			// but then thought that making it compatible with the standard pocketchip-batt service would be a good idea.
-			// The newer pocketchip-one will correct the voltage, so the level calculated this way will match the gauge.
-			const int max_voltage = 4250;
-            const int min_voltage = 3275;
+		if (read_int_file(PATH_BATT_CHARGE_NOW, &voltage) == 0) {
 			gauge = 100 * (voltage - min_voltage) / (max_voltage - min_voltage);
-			if (gauge < 0)
+			if (gauge < 0) {
 				gauge = 0;
-			if (gauge > 100)
+			} else if (gauge > 100) {
 				gauge = 100;
+			}
 
 			sprintf(buf, "%d%%", gauge);
-
 		} else {
 			sprintf(buf, "?");
 		}
 
-		if (read_battery_file("/usr/lib/pocketchip-batt/charging", &charging) != 0) {
+		if (read_status_file(PATH_BATT_STATUS, &charging) != 0) {
 			charging = 0;
 		}
 
@@ -131,14 +153,15 @@ static int draw() {
 		XFlush(display);
 
 		result = 0;
-
 	} while (0);
 
-	if (font)
+	if (font) {
 		XftFontClose(display, font);
+	}
 
-	if (font_draw)
+	if (font_draw) {
 		XftDrawDestroy(font_draw);
+	}
 
 	return result;
 }
@@ -155,7 +178,6 @@ static void usage() {
 }
 
 int main(int argc, char **argv) {
-
 	static struct option longopts[] = {
 		{ "text", optional_argument, NULL, 't' },
 		{ "background", optional_argument, NULL, 'b' },
@@ -169,7 +191,7 @@ int main(int argc, char **argv) {
 			case 'f':
 				font_name = optarg;
 				break;
-			case 't':
+			case 't':	
 				foreground_color_name = optarg;
 				break;
 			case 'b':
@@ -183,6 +205,16 @@ int main(int argc, char **argv) {
 		}
 	}
 	
+	if (read_int_file(PATH_BATT_CHARGE_MIN, &min_voltage) != 0) {
+		fprintf(stderr, "Could not get min voltage\n");
+		return 1;
+	}
+
+	if (read_int_file(PATH_BATT_CHARGE_MAX, &max_voltage) != 0) {
+		fprintf(stderr, "Could not get max voltage\n");
+		return 1;
+	}
+
 	display = XOpenDisplay(NULL);
 	if (!display) {
 		fprintf(stderr, "Could not open the display\n");
@@ -218,7 +250,6 @@ int main(int argc, char **argv) {
 	XFlush(display);
 
 	while (1) {
-
 		if (!XPending(display)) {	
 			fd_set fds;
 			FD_ZERO(&fds);
@@ -241,8 +272,9 @@ int main(int argc, char **argv) {
 				case MapNotify:
 					break;
 				case Expose:
-					if (e.xexpose.count == 0)
+					if (e.xexpose.count == 0) {
 						draw();
+					}
 					break;
 			}
 		}
@@ -250,5 +282,3 @@ int main(int argc, char **argv) {
 
 	return 0;
 }
-
-// vim: sw=4 ts=4
